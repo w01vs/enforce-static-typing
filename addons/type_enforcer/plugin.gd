@@ -74,22 +74,41 @@ func _check_script(script: GDScript) -> void:
 	var var_regex: RegEx = RegEx.new()
 	var_regex.compile(r"^(?:@[\w\s]+)*\s*(var|const)\s+\w+")
 
-	for i in lines.size():
+	var i := 0
+	while i < lines.size():
 		var line: String = lines[i].strip_edges()
 		var line_number: int = i + 1
 
 		# Skip empty lines and comments
 		if line == "" or line.begins_with("#"):
+			i += 1
 			continue
 
-		# Check for untyped functions
-		if line.begins_with("func ") and (":" not in line or "->" not in line):
-			issues.append("Line %d: Untyped function: %s" % [line_number, line])
+		# Check for untyped functions (including multi-line headers)
+		if line.begins_with("func "):
+			var func_lines := [line]
+			while not line.contains(")") and i + 1 < lines.size():
+				i += 1
+				line = lines[i].strip_edges()
+				func_lines.append(line)
+
+			var full_signature := " ".join(func_lines)
+			var param_list_start := full_signature.find("(")
+			var param_list_end := full_signature.find(")")
+			if param_list_start != -1 and param_list_end > param_list_start:
+				var params := full_signature.substr(param_list_start + 1, param_list_end - param_list_start - 1).split(",", false)
+				for param in params:
+					param = param.strip_edges()
+					if param != "" and ":" not in param:
+						issues.append("Line %d: Untyped function parameter: %s" % [line_number, param])
+
+			if (":" not in full_signature or "->" not in full_signature):
+				issues.append("Line %d: Untyped function: %s" % [line_number, full_signature])
+			i += 1
 			continue
 
 		# Check for variable/constant declarations
 		if var_regex.search(line):
-			# Extract the type part of the line (after the colon)
 			var type_str: String = ""
 			var type_match: int = line.find(":")
 			var equals_match: int = line.find("=")
@@ -97,17 +116,21 @@ func _check_script(script: GDScript) -> void:
 				type_str = line.substr(type_match + 1, equals_match - type_match - 1).strip_edges()
 			elif type_match < 0:
 				issues.append("Line %d: Missing type: %s" % [line_number, line])
+				i += 1
 				continue
 
 			var after_colon: String = line.substr(type_match + 1).strip_edges()
 			if after_colon.begins_with("=") or after_colon == "":
 				issues.append("Line %d: Missing type: %s" % [line_number, line])
+				i += 1
 				continue
 
 			if line.contains(":="):
 				issues.append("Line %d: Using disallowed type inference: %s" % [line_number, line])
+				i += 1
 				continue
-			# Check if the type is valid
+
+		i += 1
 
 	if issues.size() > 0:
 		push_warning("Typing issues in %s:\n  %s" % [script.resource_path, "\n  ".join(issues)])
